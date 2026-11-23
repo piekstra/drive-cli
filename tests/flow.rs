@@ -4,7 +4,7 @@
 
 mod support;
 
-use pk_cli_drive::google::fake::{ACCOUNT, MY_DRIVE, ROOT_ID};
+use pk_cli_drive::google::fake::{When, ACCOUNT, MY_DRIVE, ROOT_ID};
 use serde_json::Value;
 use support::{md5_hex, s, Env, PROFILE};
 
@@ -612,4 +612,54 @@ fn rmdir_trashes_only_empty_folders_after_checking_every_address() {
         &format!("gdrive:{PROFILE}/root/Scratch"),
     ]);
     assert!(f.is_trashed(&scratch));
+}
+
+#[test]
+fn a_trash_that_fails_partway_names_what_is_already_in_the_trash() {
+    let e = Env::signed_in();
+    let f = e.fake();
+    let refuse = |id: &str| {
+        f.fail_next(
+            &format!("PATCH /drive/v3/files/{id}"),
+            403,
+            "insufficientFilePermissions",
+            1,
+            When::Before,
+        )
+    };
+
+    let one = f.add_file(ROOT_ID, "one.txt", b"1");
+    let two = f.add_file(ROOT_ID, "two.txt", b"2");
+    refuse(&two);
+    let err = e.fails(3, &["rm", "--force", &at("one.txt"), &at("two.txt")]);
+    let remedy = err["remedy"].as_str().unwrap_or_default();
+    assert!(
+        remedy.contains("already trashed: ") && remedy.contains("one.txt"),
+        "{err}"
+    );
+    assert!(!remedy.contains("two.txt"), "{err}");
+    assert!(f.is_trashed(&one) && !f.is_trashed(&two));
+
+    let d1 = f.add_folder(ROOT_ID, "d1");
+    let d2 = f.add_folder(ROOT_ID, "d2");
+    refuse(&d2);
+    let err = e.fails(3, &["rmdir", "--force", &at("d1"), &at("d2")]);
+    let remedy = err["remedy"].as_str().unwrap_or_default();
+    assert!(
+        remedy.contains("already trashed: ") && remedy.contains("d1"),
+        "{err}"
+    );
+    assert!(f.is_trashed(&d1) && !f.is_trashed(&d2));
+
+    // The first item failing leaves the remedy as Drive's error gave it.
+    let three = f.add_file(ROOT_ID, "three.txt", b"3");
+    refuse(&three);
+    let err = e.fails(3, &["rm", "--force", &at("three.txt")]);
+    assert!(
+        !err["remedy"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("already trashed"),
+        "{err}"
+    );
 }

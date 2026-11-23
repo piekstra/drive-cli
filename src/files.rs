@@ -741,6 +741,25 @@ fn occupied(d: &Drive, rel: &str) -> CliError {
     .with_remedy("pass --force to replace it; the file there goes to the Google Drive trash")
 }
 
+/// A trash that Drive did not carry out, or that did not read back.
+fn not_trashed(target: &str) -> CliError {
+    CliError::Upstream(format!("{target} was not moved to the trash"))
+}
+
+/// An error partway through trashing several items, naming the ones already
+/// in the trash, so whoever runs it again knows what is left.
+fn after_trashing(e: CliError, trashed: &[String]) -> CliError {
+    if trashed.is_empty() {
+        return e;
+    }
+    let done = format!("already trashed: {}", trashed.join(", "));
+    let remedy = match e.remedy() {
+        Some(r) => format!("{r}; {done}"),
+        None => done,
+    };
+    e.with_remedy(remedy)
+}
+
 // ── rm ──────────────────────────────────────────────────────────────────
 
 pub fn rm(
@@ -804,15 +823,12 @@ pub fn rm(
     )?;
     let mut trashed = Vec::new();
     for ((d, a), target) in stores.iter().zip(&addresses).zip(&shown) {
-        if !d.delete_file(&a.rel)? || d.exists(&a.rel)? {
-            return Err(CliError::Upstream(format!(
-                "{target} was not moved to the trash{}",
-                if trashed.is_empty() {
-                    String::new()
-                } else {
-                    format!(" (already trashed: {})", trashed.join(", "))
-                }
-            )));
+        let gone = d
+            .delete_file(&a.rel)
+            .and_then(|done| Ok(done && !d.exists(&a.rel)?))
+            .map_err(|e| after_trashing(e, &trashed))?;
+        if !gone {
+            return Err(after_trashing(not_trashed(target), &trashed));
         }
         trashed.push(target.clone());
     }
@@ -903,22 +919,12 @@ pub fn rmdir(
     )?;
     let mut trashed = Vec::new();
     for ((d, a), target) in stores.iter().zip(&addresses).zip(&shown) {
-        let gone = d.trash_empty_folder(&a.rel).map_err(|e| {
-            if trashed.is_empty() {
-                e
-            } else {
-                e.with_remedy(format!("already trashed: {}", trashed.join(", ")))
-            }
-        })?;
-        if !gone || item(d, &a.rel)? != Item::Missing {
-            return Err(CliError::Upstream(format!(
-                "{target} was not moved to the trash{}",
-                if trashed.is_empty() {
-                    String::new()
-                } else {
-                    format!(" (already trashed: {})", trashed.join(", "))
-                }
-            )));
+        let gone = d
+            .trash_empty_folder(&a.rel)
+            .and_then(|done| Ok(done && item(d, &a.rel)? == Item::Missing))
+            .map_err(|e| after_trashing(e, &trashed))?;
+        if !gone {
+            return Err(after_trashing(not_trashed(target), &trashed));
         }
         trashed.push(target.clone());
     }
