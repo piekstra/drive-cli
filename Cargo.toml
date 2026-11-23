@@ -1,0 +1,49 @@
+[package]
+name = "drive-cli"
+version = "0.1.0"
+edition = "2021"
+# pk-cli-drive needs 1.89 (`File::lock`).
+rust-version = "1.89"
+description = "gdrv: Google Drive from the command line for scripts and agents, through Drive's own API with the owner's OAuth client: ls, cat, cp with md5 checks, mv, rm to the trash, mkdir, md5sum, duplicates. Unofficial; not affiliated with Google."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/piekstra/drive-cli"
+readme = "README.md"
+keywords = ["google-drive", "drive", "cli", "rclone"]
+categories = ["command-line-utilities"]
+
+# The logic lives in the library; `main.rs` parses arguments and maps errors
+# to exit codes.
+[lib]
+name = "drive_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gdrv"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+serde_json = { version = "1", features = ["preserve_order"] }
+pk-cli-core = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.2" }
+pk-cli-auth = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.2" }
+pk-cli-config = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.2" }
+pk-cli-secrets = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.2" }
+pk-cli-selfupdate = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.2" }
+pk-cli-drive = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.2", features = ["google"] }
+
+[target.'cfg(unix)'.dependencies]
+# SIGPIPE back to its default, so `gdrv ls … | head` ends quietly.
+libc = "0.2"
+
+[dev-dependencies]
+# The fake Drive API server on 127.0.0.1 the black-box tests sign in to.
+pk-cli-drive = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.2", features = ["fake-google"] }
+assert_cmd = "2"
+tempfile = "3"
+# Follows the fake's sign-in page to the loopback listener `gdrv login` waits on.
+reqwest = { version = "0.12", default-features = false, features = ["blocking"] }
+
+[profile.release]
+strip = true
+lto = true

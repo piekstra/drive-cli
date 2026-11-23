@@ -1,0 +1,61 @@
+# How gdrv maps onto Google Drive
+
+gdrv is a thin layer over cli-common's `pk-cli-drive`.
+[Its guide](https://github.com/piekstra/cli-common/blob/main/crates/pk-cli-drive/docs/google-drive.md)
+covers the OAuth client, the vault, profiles, scopes and the store. This page
+covers what gdrv adds: addresses, the file commands, and the traps they
+handle.
+
+## Addresses
+
+`gdrive:<profile>/<folder id>[/<path>]` names a folder by its id, then a
+path of names below it. An id, unlike a name, is unique and does not change
+when the folder is renamed or moved. The address's folder is the store:
+`mv` works within one, and every path is resolved from it.
+
+`root` is accepted wherever a folder id is, and means the account's My
+Drive. Drive's API takes `root` as an alias for that folder's real id. gdrv
+resolves it once, through a metadata read, to the real id that listings
+report as a parent. Without that step, every path under `root` would resolve
+to nothing. pk-cli-drive v0.37.2 fixed this, and its tests and gdrv's cover
+every operation under `root` against the fake server.
+
+## Traps
+
+| Trap | What gdrv does |
+|---|---|
+| **Names are not unique.** One folder can hold two items with the same name, so a path can name two things | A command that lists a folder holding such a pair, or whose path passes through one, stops: exit 1, reason `duplicate_name`. `gdrv duplicates <address>` lists every shared name with each item's id; keep one in the Drive web page |
+| **Google's own documents have no bytes.** Docs, Sheets and Slides have no md5 and no content to download | Listed as type `document` with no md5. `cat` and `md5sum` refuse one (reason `google_document`); `cp` skips them on download and counts them; an upload refuses to replace one |
+| **Shortcuts point elsewhere.** A shortcut's target can be in another folder, or in someone else's Drive | The default `whole` listing follows them, as rclone does. Every write refuses to go onto or through one (exit 2, reason `shortcut`), so a copy never lands in a folder outside the store |
+| **A name can hold `/` or be `..`.** Drive allows both, and joined onto a local path they leave the destination | A download refuses such names before writing anything (exit 1, reason `unsafe_name`) |
+| **Drive is case-sensitive; macOS is not.** `A.txt` and `a.txt` can sit side by side in Drive, but on a Mac they land on one file | Refused the same way, as is a file named like a folder another file lands in |
+| **Replacing a file can lose its history.** Deleting and re-uploading gives a new id and drops the revisions | `cp --force` updates the file in place: same id, a new revision |
+| **A 200 is not proof.** | Every write is read back: the md5 after an upload or a download, the new path and the empty old one after a move, the path gone after `rm` |
+| **The trash is not deletion.** | `rm` only trashes, and only files. A trashed item is gone from every listing |
+
+## Coming from rclone
+
+| rclone | gdrv |
+|---|---|
+| `rclone lsjson -R --files-only remote:dir` | `gdrv --json ls -R gdrive:<profile>/<folder id>` |
+| `rclone cat` | `gdrv cat` |
+| `rclone copy src remote:dir` | `gdrv cp src gdrive:…/dir` |
+| `rclone copy remote:dir dst` | `gdrv cp gdrive:…/dir dst` |
+| `rclone moveto` | `gdrv mv` |
+| `rclone delete` (files) | `gdrv rm` (to the trash) |
+| `rclone mkdir` | `gdrv mkdir` |
+| `rclone md5sum` | `gdrv md5sum` |
+| `rclone dedupe --dry-run` | `gdrv duplicates` |
+
+Where they differ:
+
+- **A changed file:** `rclone copy` replaces a file whose contents differ.
+  `gdrv cp` refuses the whole copy, before writing anything, unless `--force`.
+- **Google documents:** rclone exports them on download (as `.docx`,
+  `.xlsx` and so on) and lists them with size -1. gdrv lists them with no
+  size or md5, and skips them on download.
+- **Addresses:** an rclone remote is rooted at a folder in the config
+  file. A gdrv address carries the profile and the folder id itself, so
+  there is no config to keep.
+- **The OAuth client and tokens:** rclone keeps them in `rclone.conf`.
+  gdrv keeps them in its vault, sealed under a keychain-held key.

@@ -1,0 +1,162 @@
+name: release
+
+# Cut a release by pushing a signed tag like `v0.1.0`. Cross-platform builds
+# live here rather than in per-push CI, so the macOS runner (about 10x Linux)
+# is billed once per release instead of once per commit. One macOS job builds
+# both Apple targets (the SDK is universal, so it cross-compiles Intel); one
+# Linux job builds x86_64. The build jobs are independent (fail-fast: false),
+# so a slow macOS queue never stops the Linux build.
+#
+# Only `publish`, which runs on a tag alone and runs no build code, can write
+# to the repository; the builds run with a read-only token that checkout does
+# not persist. No cache here: a tag's build starts clean.
+#
+# The tag must match Cargo.toml's version, or nothing is built. `publish`
+# attaches whatever was built to a draft and publishes it only once every
+# expected asset is there; a missing one fails the run and leaves the draft,
+# so `gdrv self-update` keeps finding the last whole release.
+#
+# A pull request that changes how releases are built, or the dependencies
+# and version (Cargo.toml, Cargo.lock), runs every job but `publish` as a dry
+# run: the macOS builds run nowhere else, so a dependency that breaks them
+# shows on its pull request, not on the tag.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "build.rs"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  versions:
+    name: check versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The tag is Cargo.toml's version
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+
+  build:
+    name: build ${{ matrix.name }}
+    needs: versions
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            name: apple (aarch64 + x86_64)
+            targets: "aarch64-apple-darwin x86_64-apple-darwin"
+            run: "aarch64-apple-darwin"
+          - os: ubuntu-latest
+            name: linux x86_64
+            targets: "x86_64-unknown-linux-gnu"
+            run: "x86_64-unknown-linux-gnu"
+    env:
+      TARGETS: ${{ matrix.targets }}
+      RUNNABLE: ${{ matrix.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+      # Asset names are the contract `gdrv self-update` resolves against:
+      # gdrv-<target>.tar.gz plus a sibling .sha256.
+      - name: Build and package each target
+        run: |
+          set -euo pipefail
+          sha256() { if command -v shasum >/dev/null; then shasum -a 256 "$1"; else sha256sum "$1"; fi; }
+          for t in $TARGETS; do
+            rustup target add "$t"
+            cargo build --release --locked --target "$t"
+            tar -C "target/$t/release" -czf "gdrv-$t.tar.gz" gdrv
+            sha256 "gdrv-$t.tar.gz" > "gdrv-$t.tar.gz.sha256"
+          done
+      # A binary that builds and then fails at startup is not published. The
+      # x86_64 macOS binary cannot run on this arm64 runner. Nothing here reads
+      # a credential or reaches the network: the keychain service is an empty
+      # one, and rm without --force stops before any read.
+      - name: Run what this runner can run
+        run: |
+          set -euo pipefail
+          home="$RUNNER_TEMP/smoke-home"
+          mkdir -p "$home"
+          b="target/$RUNNABLE/release/gdrv"
+          run() { env HOME="$home" XDG_CONFIG_HOME="$home/config" GDRV_KEYCHAIN_SERVICE=piekstra.gdrv.hermetic-tests "$b" "$@"; }
+          run --version
+          run info --json > /dev/null
+          run ls --help > /dev/null
+          code=0; run --json rm gdrive:smoke/root/x.txt < /dev/null > /dev/null 2>&1 || code=$?
+          [ "$code" = 6 ] || { echo "::error::rm without --force exited $code, not 6"; exit 1; }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist-${{ runner.os }}
+          path: |
+            gdrv-*.tar.gz
+            gdrv-*.tar.gz.sha256
+          retention-days: 3
+          if-no-files-found: error
+
+  publish:
+    name: publish the release
+    needs: [versions, build]
+    if: ${{ !cancelled() && needs.versions.result == 'success' && startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - run: ls -l dist
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          draft: true
+          files: |
+            dist/gdrv-*.tar.gz
+            dist/gdrv-*.tar.gz.sha256
+          generate_release_notes: true
+      - name: Every expected asset was attached
+        run: |
+          set -euo pipefail
+          missing=0
+          for t in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu; do
+            for f in "gdrv-$t.tar.gz" "gdrv-$t.tar.gz.sha256"; do
+              [ -f "dist/$f" ] || { echo "::error::missing $f"; missing=1; }
+            done
+          done
+          exit "$missing"
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A re-run of an older tag must not move Latest back to it.
+          current=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null) || echo "::warning::could not read the latest release, so this tag counts as the newest"
+          newest=$(printf '%s\n%s\n' "$current" "$GITHUB_REF_NAME" | sort -V | tail -1)
+          latest=false; [ "$newest" = "$GITHUB_REF_NAME" ] && latest=true
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$latest"
