@@ -31,6 +31,7 @@ const COMMANDS: &[&[&str]] = &[
     &["cp"],
     &["mv"],
     &["rm"],
+    &["rmdir"],
     &["mkdir"],
     &["md5sum"],
     &["hashes"],
@@ -64,7 +65,16 @@ fn every_commands_help_renders() {
 #[test]
 fn file_commands_help_names_the_listing_and_the_address() {
     let e = Env::offline();
-    for c in ["ls", "cat", "cp", "mv", "rm", "md5sum", "duplicates"] {
+    for c in [
+        "ls",
+        "cat",
+        "cp",
+        "mv",
+        "rm",
+        "rmdir",
+        "md5sum",
+        "duplicates",
+    ] {
         let help = String::from_utf8(e.run(&[c, "--help"]).stdout).unwrap();
         assert!(help.contains("listing"), "{c}: {help}");
         assert!(help.contains("gdrive:<profile>/<folder id>"), "{c}: {help}");
@@ -96,6 +106,7 @@ fn version_info_and_completions() {
         "cp",
         "mv",
         "rm",
+        "rmdir",
         "mkdir",
         "md5sum",
         "duplicates",
@@ -134,6 +145,8 @@ fn a_bad_address_is_exit_2_with_one_json_error_document() {
         &["mv", "gdrive:home/root/a.txt", "./a.txt"],
         &["rm", "gdrive:home/root"],
         &["rm", "./a.txt"],
+        &["rmdir", "gdrive:home/root"],
+        &["rmdir", "./a-dir"],
     ] {
         let err = e.fails(2, args);
         assert_eq!(err["code"], "usage", "{args:?}: {err}");
@@ -169,6 +182,8 @@ fn rm_without_force_and_without_a_terminal_is_exit_6_before_anything_is_read() {
     assert_eq!(err["code"], "confirmation_required", "{err}");
     let out = e.run(&["rm", "gdrive:home/root/a.txt"]);
     assert_eq!(out.status.code(), Some(6));
+    let err = e.fails(6, &["rmdir", "gdrive:home/root/empty"]);
+    assert_eq!(err["code"], "confirmation_required", "{err}");
 }
 
 #[test]

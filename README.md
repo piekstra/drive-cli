@@ -70,7 +70,8 @@ gdrive:<profile>/<folder id>[/<path>]
 ```
 
 - `<profile>` is a profile `login` made.
-- `<folder id>` is the part of a folder's URL after `/folders/`. `root` is My Drive.
+- `<folder id>` is the part of a folder's URL after `/folders/`, or the `id`
+  that `ls` prints for it. `root` is My Drive.
 - `<path>` is a path of names below that folder.
 
 Anything that does not start with `gdrive:` is a local path; write
@@ -85,11 +86,12 @@ must name the same profile, or the command is exit 2.
 
 | Command | What it does | Listing | Schema |
 |---|---|---|---|
-| `ls <address> [-R]` | One level: folders and files. `-R`: every file below, by path. Each file has its size, modified time and md5 | `--listing`, default `whole` | `drive-entry-list/v1` |
+| `ls <address> [-R]` | One level: folders and files. `-R`: every file below, by path. Each item has its Drive id, and each file its size, modified time and md5. Items that share a name are each listed | `--listing`, default `whole` | `drive-entry-list/v1` |
 | `cat <address>` | One file's bytes on stdout. With `--json`, the content as UTF-8 text or base64 | `whole` | `drive-file/v1` |
 | `cp <source> <destination>` | A file or a tree, local to Drive or Drive to local | `whole` | `drive-copy/v1` |
 | `mv <source> <destination>` | Move or rename a file within one folder id's tree | `whole` | `drive-move/v1` |
 | `rm <address>...` | Move files to the Drive trash, recoverable there for 30 days | `whole` | `drive-trash/v1` |
+| `rmdir <address>...` | Move empty folders to the Drive trash; one holding anything is refused (reason `not_empty`) | `whole` | `drive-rmdir/v1` |
 | `mkdir <address>` | Make a folder and any missing parents | `whole` | `drive-mkdir/v1` |
 | `md5sum <address>` (alias `hashes`) | The md5 Drive holds for a file, or for every file below a folder | `--listing`, default `whole` | `drive-hash-list/v1` |
 | `duplicates <address>` | Every name that two or more items share in one folder | `--listing`, default `whole` | `drive-duplicate-list/v1` |
@@ -130,8 +132,9 @@ beside a shortcut without notice. The read-only commands `ls`, `md5sum` and
 
 ### Confirmation
 
-Only `rm` asks before it acts. Without a terminal, or with `--json`, it needs
-`--force` and is otherwise exit 6, before any keychain read or request. `cp`
+Only `rm` and `rmdir` ask before they act. Without a terminal, or with
+`--json`, they need `--force` and are otherwise exit 6, before any keychain
+read or request. `cp`
 and `mv` never overwrite without `--force`. `mkdir` keeps a folder that is
 already there.
 
@@ -141,16 +144,16 @@ already there.
 |---|---|
 | 0 | Done |
 | 1 | Something else failed, such as an unsafe name or two items sharing a name |
-| 2 | Usage: a bad address, a refused overwrite, a write through a shortcut, a profile not signed in |
+| 2 | Usage: a bad address, a refused overwrite, a write through a shortcut, a folder that is not empty, a profile not signed in |
 | 3 | Auth: the sign-in was refused or revoked, or the keychain did not answer |
 | 4 | Not found |
 | 5 | Google's API failed, or a write did not read back |
-| 6 | Confirmation required (`rm` without `--force`) |
+| 6 | Confirmation required (`rm` or `rmdir` without `--force`) |
 
 With `--json`, an error is one document on stdout:
 `{"error": {"code", "message", "reason", "remedy"}}`. `reason` is set when a
 script can act on it: `existing_differs`, `occupied`, `google_document`,
-`shortcut`, `unsafe_name`, `duplicate_name`.
+`shortcut`, `not_empty`, `unsafe_name`, `duplicate_name`.
 
 ## Other commands
 

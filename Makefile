@@ -53,7 +53,7 @@ SMOKE_HOME := $(CURDIR)/target/smoke-home
 SMOKE_ENV := HOME="$(SMOKE_HOME)" XDG_CONFIG_HOME="$(SMOKE_HOME)/config" \
 	XDG_CACHE_HOME="$(SMOKE_HOME)/cache" GDRV_KEYCHAIN_SERVICE=piekstra.gdrv.hermetic-tests \
 	GDRV_TEST_KEY_FILE="$(SMOKE_HOME)/keys.json"
-SMOKE_HELP := login status logout about client profiles folder auth ls cat cp mv rm mkdir md5sum \
+SMOKE_HELP := login status logout about client profiles folder auth ls cat cp mv rm rmdir mkdir md5sum \
 	duplicates config self-update completions info
 smoke: build
 	@set -e; mkdir -p "$(SMOKE_HOME)"; \
