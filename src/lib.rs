@@ -34,6 +34,9 @@ pub fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Rm(args) => {
             files::rm(&drive_cli()?, profile, args, json, cli.common.interactive())
         }
+        Command::Rmdir(args) => {
+            files::rmdir(&drive_cli()?, profile, args, json, cli.common.interactive())
+        }
         Command::Mkdir(args) => files::mkdir(&drive_cli()?, profile, args, json),
         Command::Md5sum(args) => files::md5sum(&drive_cli()?, profile, args, json),
         Command::Duplicates(args) => files::duplicates(&drive_cli()?, profile, args, json),

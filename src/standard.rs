@@ -26,6 +26,7 @@ pub const CAPABILITIES: &[&str] = &[
     "cp",
     "mv",
     "rm",
+    "rmdir",
     "mkdir",
     "md5sum",
     "duplicates",

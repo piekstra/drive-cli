@@ -44,9 +44,12 @@ pub enum Command {
     ///
     /// One level lists folders and files; -R lists every file below by its
     /// path, folders only in those paths, as `rclone lsjson -R --files-only`.
-    /// Each file has its size, modified time and md5. The default listing is
-    /// `whole`: Google's own documents (Docs, Sheets) are listed with type
-    /// `document` and no md5, and shortcuts are followed, as rclone lists.
+    /// Each item has its Drive id, which addresses a folder directly
+    /// (gdrive:<profile>/<id>), and each file its size, modified time and
+    /// md5. Items that share a name are each listed, though a path cannot
+    /// name one of them. The default listing is `whole`: Google's own
+    /// documents (Docs, Sheets) are listed with type `document` and no md5,
+    /// and shortcuts are followed, as rclone lists.
     #[command(visible_alias = "list", after_help = ADDRESS_HELP)]
     Ls(LsArgs),
 
@@ -91,10 +94,24 @@ pub enum Command {
     /// Asks first; without a terminal to ask on (or with --json) it needs
     /// --force and is otherwise exit 6, before anything is read. Every
     /// address is checked before anything is trashed. Folders are not
-    /// removed. Uses the whole listing: nothing is trashed through a
-    /// shortcut.
+    /// removed: `gdrv rmdir` trashes an empty one. Uses the whole listing:
+    /// nothing is trashed through a shortcut.
     #[command(visible_alias = "trash", after_help = ADDRESS_HELP)]
     Rm(RmArgs),
+
+    /// Move empty folders to the Google Drive trash, recoverable there for
+    /// 30 days (drive-rmdir/v1).
+    ///
+    /// Only an empty folder is trashed: one holding anything outside the
+    /// trash is refused (exit 2, reason `not_empty`), as `rclone rmdir`
+    /// refuses. Asks first; without a terminal to ask on (or with --json) it
+    /// needs --force and is otherwise exit 6, before anything is read. Every
+    /// address is checked before anything is trashed, so trash a folder's
+    /// empty subfolders first, in a run of their own. The address's own
+    /// folder id is never trashed. Uses the whole listing: neither a
+    /// shortcut nor what it points at is trashed.
+    #[command(after_help = ADDRESS_HELP)]
+    Rmdir(RmdirArgs),
 
     /// Make a folder and any missing parents under a folder id
     /// (drive-mkdir/v1). One already there is kept.
@@ -104,8 +121,9 @@ pub enum Command {
     /// The md5 Drive holds for a file, or for every file below a folder, as
     /// `md5sum` prints (drive-hash-list/v1).
     ///
-    /// Paths are relative to the folder named. Google's own documents have
-    /// no md5 and are left out. The default listing is `whole` (shortcuts
+    /// Paths are relative to the folder named, and each file has its Drive
+    /// id; files that share a name are each listed. Google's own documents
+    /// have no md5 and are left out. The default listing is `whole` (shortcuts
     /// followed).
     #[command(alias = "hashes", after_help = ADDRESS_HELP)]
     Md5sum(HashArgs),
@@ -223,6 +241,16 @@ pub struct MvArgs {
 #[derive(Args, Debug)]
 pub struct RmArgs {
     /// gdrive:<profile>/<folder id>/<path of a file>, one or more.
+    #[arg(value_name = "ADDRESS", required = true, num_args = 1..)]
+    pub addresses: Vec<String>,
+    /// Do not ask (required when there is no terminal to ask on).
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct RmdirArgs {
+    /// gdrive:<profile>/<folder id>/<path of an empty folder>, one or more.
     #[arg(value_name = "ADDRESS", required = true, num_args = 1..)]
     pub addresses: Vec<String>,
     /// Do not ask (required when there is no terminal to ask on).

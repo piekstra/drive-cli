@@ -14,7 +14,11 @@ The first release.
 - Addresses `gdrive:<profile>/<folder id>[/<path>]`, where `root` is My Drive.
 - File commands: `ls [-R]`, `cat`, `cp` (files and trees, both ways, every
   md5 compared, unchanged files skipped), `mv`, `rm` (to the trash), `mkdir`,
-  `md5sum`, `duplicates`. `--json` on every command.
+  `md5sum`, `duplicates`, and `rmdir` (an empty folder to the trash).
+  `--json` on every command.
+- `ls` and `md5sum` list every item with its Drive id, including items that
+  share a name, as rclone does. A path through a shared name is refused
+  (reason `duplicate_name`), and a folder's id addresses it directly.
 - With no terminal on stdin, a keychain read waits at most 60 seconds
   (`GDRV_KEYCHAIN_WAIT`) and then exits 3.
-- Built on cli-common v0.37.2.
+- Built on cli-common v0.37.3.

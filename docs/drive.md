@@ -17,21 +17,23 @@ when the folder is renamed or moved. The address's folder is the store:
 Drive. Drive's API takes `root` as an alias for that folder's real id. gdrv
 resolves it once, through a metadata read, to the real id that listings
 report as a parent. Without that step, every path under `root` would resolve
-to nothing. pk-cli-drive v0.37.2 fixed this, and its tests and gdrv's cover
-every operation under `root` against the fake server.
+to nothing. pk-cli-drive v0.37.2 fixed this. Its tests and gdrv's cover
+every operation under `root` against the fake server, and listing My Drive
+by `root` and trashing a folder under it were checked against Drive's own
+API.
 
 ## Traps
 
 | Trap | What gdrv does |
 |---|---|
-| **Names are not unique.** One folder can hold two items with the same name, so a path can name two things | A command that lists a folder holding such a pair, or whose path passes through one, stops: exit 1, reason `duplicate_name`. `gdrv duplicates <address>` lists every shared name with each item's id; keep one in the Drive web page |
+| **Names are not unique.** One folder can hold two items with the same name, so a path can name two things | `ls` and `md5sum` list every item with its Drive id, both of a pair included, as rclone does. A path through a shared name stops (exit 1, reason `duplicate_name`), and so does a copy or download of a folder holding a pair, since it could not tell which is meant. `gdrv duplicates <address>` lists every shared name with each item's id. Address a folder by its own id (`gdrive:<profile>/<id>`), or keep one item in the Drive web page |
 | **Google's own documents have no bytes.** Docs, Sheets and Slides have no md5 and no content to download | Listed as type `document` with no md5. `cat` and `md5sum` refuse one (reason `google_document`); `cp` skips them on download and counts them; an upload refuses to replace one |
 | **Shortcuts point elsewhere.** A shortcut's target can be in another folder, or in someone else's Drive | The default `whole` listing follows them, as rclone does. Every write refuses to go onto or through one (exit 2, reason `shortcut`), so a copy never lands in a folder outside the store |
 | **A name can hold `/` or be `..`.** Drive allows both, and joined onto a local path they leave the destination | A download refuses such names before writing anything (exit 1, reason `unsafe_name`) |
 | **Drive is case-sensitive; macOS is not.** `A.txt` and `a.txt` can sit side by side in Drive, but on a Mac they land on one file | Refused the same way, as is a file named like a folder another file lands in |
 | **Replacing a file can lose its history.** Deleting and re-uploading gives a new id and drops the revisions | `cp --force` updates the file in place: same id, a new revision |
 | **A 200 is not proof.** | Every write is read back: the md5 after an upload or a download, the new path and the empty old one after a move, the path gone after `rm` |
-| **The trash is not deletion.** | `rm` only trashes, and only files. A trashed item is gone from every listing |
+| **The trash is not deletion.** | `rm` trashes files and `rmdir` empty folders; nothing is deleted for good. A trashed item is gone from every listing, and an item in the trash does not count against `rmdir`'s emptiness |
 
 ## Coming from rclone
 
@@ -43,6 +45,7 @@ every operation under `root` against the fake server.
 | `rclone copy remote:dir dst` | `gdrv cp gdrive:…/dir dst` |
 | `rclone moveto` | `gdrv mv` |
 | `rclone delete` (files) | `gdrv rm` (to the trash) |
+| `rclone rmdir` | `gdrv rmdir` (to the trash) |
 | `rclone mkdir` | `gdrv mkdir` |
 | `rclone md5sum` | `gdrv md5sum` |
 | `rclone dedupe --dry-run` | `gdrv duplicates` |
