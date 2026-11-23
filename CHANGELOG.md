@@ -3,6 +3,16 @@
 All notable changes to gdrv. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.1
+
+- `cp` copies a tree several files at a time: uploads 4 at a time, after
+  making every missing folder once, and downloads 8. Each file is still
+  checked by md5, and the counts are unchanged. The first failure stops the
+  copy, and what was copied before it stays.
+- `cp --transfers N` (1 to 8) lowers how many files are in flight at once,
+  as rclone's flag does. Uploads never go past 4.
+- Built on cli-common v0.37.4.
+
 ## 0.1.0
 
 The first release.

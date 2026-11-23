@@ -33,6 +33,7 @@ API.
 | **Drive is case-sensitive; macOS is not.** `A.txt` and `a.txt` can sit side by side in Drive, but on a Mac they land on one file | Refused the same way, as is a file named like a folder another file lands in |
 | **Replacing a file can lose its history.** Deleting and re-uploading gives a new id and drops the revisions | `cp --force` updates the file in place: same id, a new revision |
 | **A 200 is not proof.** | Every write is read back: the md5 after an upload or a download, the new path and the empty old one after a move, the path gone after `rm` |
+| **Drive takes about three writes a second per user.** More at once only draws 429s | A tree copy uploads 4 files at a time and downloads 8, after making each missing folder once. The retries absorb a 429. `cp --transfers N` lowers both, `1` being one at a time. The first failure stops the copy, and what was already copied stays |
 | **The trash is not deletion.** | `rm` trashes files and `rmdir` empty folders; nothing is deleted for good. A trashed item is gone from every listing, and an item in the trash does not count against `rmdir`'s emptiness |
 
 ## Coming from rclone
@@ -43,6 +44,7 @@ API.
 | `rclone cat` | `gdrv cat` |
 | `rclone copy src remote:dir` | `gdrv cp src gdrive:…/dir` |
 | `rclone copy remote:dir dst` | `gdrv cp gdrive:…/dir dst` |
+| `rclone copy --transfers 4` | `gdrv cp --transfers 4` (1 to 8; uploads at most 4) |
 | `rclone moveto` | `gdrv mv` |
 | `rclone delete` (files) | `gdrv rm` (to the trash) |
 | `rclone rmdir` | `gdrv rmdir` (to the trash) |

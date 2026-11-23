@@ -223,6 +223,11 @@ pub struct CpArgs {
     /// Replace files already there that hold other bytes.
     #[arg(long)]
     pub force: bool,
+    /// For a tree, at most N files in flight at once, 1 to 8. Downloads run
+    /// 8 at a time unless set, uploads 4: Drive takes about three writes a
+    /// second per user, so uploads never go past 4.
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u8).range(1..=8))]
+    pub transfers: Option<u8>,
 }
 
 #[derive(Args, Debug)]

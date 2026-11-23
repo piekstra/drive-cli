@@ -332,6 +332,17 @@ fn cp_trees_both_ways_skip_what_matches() {
     assert_eq!(forced["replaced"], 1);
     assert_eq!(std::fs::read(back.join("a.json")).unwrap(), b"a");
 
+    // One file at a time, both ways.
+    std::fs::write(tree.join("sub/d.json"), b"d").unwrap();
+    let one = e.ok(&["cp", "--transfers", "1", s(&tree), &at("copy")]);
+    assert_eq!(
+        (one["copied"].as_u64(), one["unchanged"].as_u64()),
+        (Some(1), Some(3))
+    );
+    let one = e.ok(&["cp", "--transfers", "1", &at("copy"), s(&back)]);
+    assert_eq!(one["copied"], 1);
+    assert_eq!(std::fs::read(back.join("sub/d.json")).unwrap(), b"d");
+
     // A file in the way of a tree, either side.
     let err = e.fails(2, &["cp", s(&tree), &at("copy/a.json")]);
     assert_eq!(err["code"], "usage");
