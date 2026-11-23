@@ -5,12 +5,12 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use pk_cli_core::{confirm, output, CliError};
-use pk_cli_drive::google::{md5_file, Drive, DriveCli, Existing, Listing};
-use pk_cli_drive::{reason, FileEntry, RemoteRead, RemoteStore};
+use pk_cli_drive::google::{md5_file, Drive, DriveCli, Existing, ItemKind, ListedItem, Listing};
+use pk_cli_drive::{reason, RemoteRead, RemoteStore};
 use serde_json::{json, Map, Value};
 
 use crate::address::{join, split, DriveAddress, Location};
-use crate::cli::{CatArgs, CpArgs, HashArgs, LsArgs, MkdirArgs, MvArgs, RmArgs};
+use crate::cli::{CatArgs, CpArgs, HashArgs, LsArgs, MkdirArgs, MvArgs, RmArgs, RmdirArgs};
 use crate::context::{open, BIN};
 
 /// What is at a path in a store.
@@ -42,11 +42,36 @@ pub fn item(d: &Drive, rel: &str) -> Result<Item, CliError> {
         return Ok(Item::Missing);
     }
     let (parent, name) = split(rel);
-    if d.list_dirs(parent)?.iter().any(|n| n == name) {
-        Ok(Item::Folder)
-    } else {
-        Ok(Item::Document)
+    let found = named(d, parent, name)?;
+    let folders = found.iter().filter(|i| i.kind == ItemKind::Folder).count();
+    match (folders, found.len() - folders) {
+        (1, 0) => Ok(Item::Folder),
+        // A document, which the bytes listing leaves out.
+        (0, 0) | (0, 1) => Ok(Item::Document),
+        _ => Err(shared(d, rel, &found)),
     }
+}
+
+/// The items named `name` directly in the folder `parent`, from a listing
+/// that shows every item, so two that share the name are both there.
+fn named(d: &Drive, parent: &str, name: &str) -> Result<Vec<ListedItem>, CliError> {
+    Ok(d.list_items(parent, false)?
+        .into_iter()
+        .filter(|i| i.rel == name)
+        .collect())
+}
+
+/// A path that names more than one item.
+fn shared(d: &Drive, rel: &str, found: &[ListedItem]) -> CliError {
+    let ids: Vec<&str> = found.iter().map(|i| i.id.as_str()).collect();
+    CliError::Other(format!(
+        "{} names {} items (ids {}); Drive allows that, but a path must name one, so nothing \
+         was guessed",
+        d.target(rel),
+        found.len(),
+        ids.join(", ")
+    ))
+    .because(reason::DUPLICATE_NAME)
 }
 
 /// An address that must be in Drive.
@@ -91,8 +116,9 @@ fn a_document(d: &Drive, rel: &str) -> CliError {
 fn explained(e: CliError, address: &str) -> CliError {
     match e.reason() {
         Some(r) if r == reason::DUPLICATE_NAME => e.with_remedy(format!(
-            "`gdrv duplicates {address}` lists every name two items share; keep one of each in \
-             Google Drive, or rename the others"
+            "`gdrv duplicates {address}` lists every name two items share, with their ids; \
+             address a folder by its own id (gdrive:<profile>/<id>), or keep one of each in \
+             Google Drive and rename the others"
         )),
         _ => e,
     }
@@ -102,27 +128,34 @@ fn rfc3339(secs: Option<i64>) -> Option<String> {
     secs.map(pk_cli_core::dates::fmt_rfc3339)
 }
 
-fn file_row(path: &str, e: &FileEntry) -> Value {
-    let mut row = Map::new();
-    row.insert("path".into(), json!(path));
-    row.insert(
-        "type".into(),
-        json!(if e.md5.is_some() { "file" } else { "document" }),
-    );
-    if let Some(size) = e.size {
-        row.insert("size".into(), json!(size));
+fn kind_name(kind: ItemKind) -> &'static str {
+    match kind {
+        ItemKind::Folder => "folder",
+        ItemKind::File => "file",
+        ItemKind::Document => "document",
     }
-    if let Some(at) = rfc3339(e.modified) {
-        row.insert("modified".into(), json!(at));
-    }
-    if let Some(md5) = &e.md5 {
-        row.insert("md5".into(), json!(md5));
-    }
-    Value::Object(row)
 }
 
-fn folder_row(path: &str) -> Value {
-    json!({"path": path, "type": "folder"})
+/// One listed item: its path under the listed folder, its type and id, and
+/// what Drive holds for it.
+fn item_row(path: &str, i: &ListedItem) -> Value {
+    let mut row = Map::new();
+    row.insert("path".into(), json!(path));
+    row.insert("type".into(), json!(kind_name(i.kind)));
+    row.insert("id".into(), json!(i.id));
+    if let Some(size) = i.size {
+        row.insert("size".into(), json!(size));
+    }
+    if let Some(at) = rfc3339(i.modified) {
+        row.insert("modified".into(), json!(at));
+    }
+    if let Some(md5) = &i.md5 {
+        row.insert("md5".into(), json!(md5));
+    }
+    if i.via_shortcut {
+        row.insert("via_shortcut".into(), json!(true));
+    }
+    Value::Object(row)
 }
 
 // ── ls ──────────────────────────────────────────────────────────────────
@@ -156,7 +189,7 @@ pub fn ls(
             .collect();
         output::table(&output::table_view(
             &rows,
-            &["path", "type", "size", "modified", "md5"],
+            &["path", "type", "size", "modified", "md5", "id"],
         ));
     });
     Ok(())
@@ -165,30 +198,25 @@ pub fn ls(
 fn list(d: &Drive, a: &DriveAddress, recursive: bool) -> Result<Vec<Value>, CliError> {
     match item(d, &a.rel)? {
         Item::Missing => Err(not_found(d, &a.rel)),
+        // Every file below, as `rclone lsjson -R --files-only` lists.
         Item::Folder if recursive => Ok(d
-            .list_entries(&a.rel)?
+            .list_items(&a.rel, true)?
             .iter()
-            .map(|e| file_row(&e.rel, e))
+            .filter(|i| i.kind != ItemKind::Folder)
+            .map(|i| item_row(&i.rel, i))
             .collect()),
-        Item::Folder => {
-            let mut rows: Vec<(String, Value)> = d
-                .list_dirs(&a.rel)?
-                .into_iter()
-                .map(|n| (n.clone(), folder_row(&n)))
-                .collect();
-            rows.extend(
-                d.list_here(&a.rel)?
-                    .iter()
-                    .map(|e| (e.rel.clone(), file_row(&e.rel, e))),
-            );
-            rows.sort_by(|x, y| x.0.cmp(&y.0));
-            Ok(rows.into_iter().map(|(_, v)| v).collect())
-        }
+        Item::Folder => Ok(d
+            .list_items(&a.rel, false)?
+            .iter()
+            .map(|i| item_row(&i.rel, i))
+            .collect()),
         found @ (Item::File(_) | Item::Document) => {
             let (parent, name) = split(&a.rel);
-            let entry = d.list_here(parent)?.into_iter().find(|e| e.rel == name);
-            Ok(vec![match (entry, found) {
-                (Some(e), _) => file_row(name, &e),
+            let listed = named(d, parent, name)?
+                .into_iter()
+                .find(|i| i.kind != ItemKind::Folder);
+            Ok(vec![match (listed, found) {
+                (Some(i), _) => item_row(name, &i),
                 (None, Item::File(md5)) => json!({"path": name, "type": "file", "md5": md5}),
                 // A document under the bytes listing, which leaves it out.
                 (None, _) => json!({"path": name, "type": "document"}),
@@ -270,12 +298,18 @@ struct Copied {
     bytes: u64,
 }
 
-fn force_remedy(e: CliError, force: bool) -> CliError {
-    if !force && e.reason() == Some(reason::EXISTING_DIFFERS) {
-        e.with_remedy("pass --force to replace them; Drive keeps the replaced file's revisions")
-    } else {
-        e
+/// The remedy for a copy refused over files with other bytes: `--force`,
+/// and what replacing costs on that side.
+fn force_remedy(e: CliError, force: bool, upload: bool) -> CliError {
+    if force || e.reason() != Some(reason::EXISTING_DIFFERS) {
+        return e;
     }
+    e.with_remedy(if upload {
+        "pass --force to replace them; Drive keeps each replaced file's earlier revisions"
+    } else {
+        "pass --force to replace them; the local files' bytes are overwritten, so copy them \
+         elsewhere first if they are wanted"
+    })
 }
 
 fn other_bytes(target: &str) -> CliError {
@@ -299,14 +333,14 @@ pub fn cp(
                 check_profile(profile, &a)?;
                 let d = open(cli, &a.store, Listing::Whole)?;
                 let (target, done) = upload(&d, &path, &a, args.force)
-                    .map_err(|e| explained(force_remedy(e, args.force), &args.destination))?;
+                    .map_err(|e| explained(force_remedy(e, args.force, true), &args.destination))?;
                 ("upload", path.display().to_string(), target, done)
             }
             (Location::Drive(a), Location::Local { path, into }) => {
                 check_profile(profile, &a)?;
                 let d = open(cli, &a.store, Listing::Whole)?;
                 let (target, done) = download(&d, &a, &path, into, args.force)
-                    .map_err(|e| explained(force_remedy(e, args.force), &args.source))?;
+                    .map_err(|e| explained(force_remedy(e, args.force, false), &args.source))?;
                 ("download", d.target(&a.rel), target, done)
             }
             (Location::Drive(_), Location::Drive(_)) => return Err(CliError::Usage(
@@ -794,6 +828,112 @@ pub fn rm(
     Ok(())
 }
 
+// ── rmdir ───────────────────────────────────────────────────────────────
+
+fn not_empty(d: &Drive, rel: &str, held: usize) -> CliError {
+    CliError::Usage(format!(
+        "{} holds {held} item(s); only an empty folder is trashed, so nothing was",
+        d.target(rel)
+    ))
+    .because(reason::NOT_EMPTY)
+    .with_remedy("move or trash what it holds first (`gdrv rm`, then `gdrv rmdir`)")
+}
+
+pub fn rmdir(
+    cli: &DriveCli,
+    profile: Option<&str>,
+    args: &RmdirArgs,
+    json: bool,
+    interactive: bool,
+) -> Result<(), CliError> {
+    let addresses = args
+        .addresses
+        .iter()
+        .map(|t| drive_address(t, "rmdir"))
+        .collect::<Result<Vec<_>, _>>()?;
+    for a in &addresses {
+        check_profile(profile, a)?;
+        if a.rel.is_empty() {
+            return Err(CliError::Usage(
+                "name a folder under the folder id; gdrv rmdir never trashes the address's own \
+                 folder (address it from its parent, or from root)"
+                    .into(),
+            ));
+        }
+    }
+    confirm::require_confirmable(
+        args.force,
+        interactive,
+        &format!(
+            "moving {} folder(s) to the Google Drive trash",
+            addresses.len()
+        ),
+    )?;
+    let mut stores = Vec::new();
+    for (a, text) in addresses.iter().zip(&args.addresses) {
+        let d = open(cli, &a.store, Listing::Whole)?;
+        match item(&d, &a.rel).map_err(|e| explained(e, text))? {
+            Item::Folder => {}
+            Item::Missing => return Err(not_found(&d, &a.rel)),
+            Item::File(_) | Item::Document => {
+                return Err(CliError::Usage(format!(
+                    "{} is a file; `gdrv rm` moves files to the trash",
+                    d.target(&a.rel)
+                )))
+            }
+        }
+        let held = d.list_items(&a.rel, false)?.len();
+        if held > 0 {
+            return Err(not_empty(&d, &a.rel, held));
+        }
+        stores.push(d);
+    }
+    let shown: Vec<String> = stores
+        .iter()
+        .zip(&addresses)
+        .map(|(d, a)| d.target(&a.rel))
+        .collect();
+    confirm::confirm(
+        args.force,
+        &format!(
+            "Move these empty folders to the Google Drive trash (recoverable there for 30 \
+             days)?\n  {}\n",
+            shown.join("\n  ")
+        ),
+    )?;
+    let mut trashed = Vec::new();
+    for ((d, a), target) in stores.iter().zip(&addresses).zip(&shown) {
+        let gone = d.trash_empty_folder(&a.rel).map_err(|e| {
+            if trashed.is_empty() {
+                e
+            } else {
+                e.with_remedy(format!("already trashed: {}", trashed.join(", ")))
+            }
+        })?;
+        if !gone || item(d, &a.rel)? != Item::Missing {
+            return Err(CliError::Upstream(format!(
+                "{target} was not moved to the trash{}",
+                if trashed.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (already trashed: {})", trashed.join(", "))
+                }
+            )));
+        }
+        trashed.push(target.clone());
+    }
+    let payload = json!({
+        "trashed": trashed.len(),
+        "items": trashed.iter().map(|t| json!({"location": t})).collect::<Vec<_>>(),
+    });
+    output::emit(json, "drive-rmdir", payload, |_| {
+        for t in &trashed {
+            println!("Trashed {t}/");
+        }
+    });
+    Ok(())
+}
+
 // ── mkdir ───────────────────────────────────────────────────────────────
 
 pub fn mkdir(
@@ -881,32 +1021,27 @@ fn hashes(d: &Drive, a: &DriveAddress) -> Result<Vec<Value>, CliError> {
         Item::Document => Err(a_document(d, &a.rel)),
         Item::File(md5) => {
             let (parent, name) = split(&a.rel);
-            let size = d
-                .list_here(parent)?
+            let listed = named(d, parent, name)?
                 .into_iter()
-                .find(|e| e.rel == name)
-                .and_then(|e| e.size);
+                .find(|i| i.kind == ItemKind::File);
             let mut row = json!({"path": name, "md5": md5});
-            if let Some(size) = size {
-                row["size"] = json!(size);
+            if let Some(i) = listed {
+                row["id"] = json!(i.id);
+                if let Some(size) = i.size {
+                    row["size"] = json!(size);
+                }
             }
             Ok(vec![row])
         }
-        Item::Folder => {
-            let prefix = if a.rel.is_empty() {
-                String::new()
-            } else {
-                format!("{}/", a.rel)
-            };
-            Ok(d.hashes(&a.rel)?
-                .into_iter()
-                .filter_map(|h| {
-                    let md5 = h.md5?;
-                    let path = h.rel.strip_prefix(&prefix).unwrap_or(&h.rel).to_string();
-                    Some(json!({"path": path, "size": h.size, "md5": md5}))
-                })
-                .collect())
-        }
+        Item::Folder => Ok(d
+            .list_items(&a.rel, true)?
+            .into_iter()
+            .filter(|i| i.kind == ItemKind::File)
+            .filter_map(|i| {
+                let md5 = i.md5?;
+                Some(json!({"path": i.rel, "id": i.id, "size": i.size, "md5": md5}))
+            })
+            .collect()),
     }
 }
 
@@ -966,10 +1101,11 @@ pub fn duplicates(
             })
             .collect();
         if rows.is_empty() {
-            eprintln!(
+            println!(
                 "No two items share a name below {}.",
                 v["location"].as_str().unwrap_or_default()
             );
+            return;
         }
         output::table(&output::table_view(&rows, &["dir", "name", "type", "ids"]));
     });

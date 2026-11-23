@@ -57,9 +57,10 @@ records what Google says about both and the test that settled it.
 
 ## What gdrv does to your files
 
-- `rm` moves files to the Drive trash, where they are recoverable for 30
-  days. It never deletes for good, never touches a folder, and asks first,
-  or needs `--force`.
+- `rm` moves files, and `rmdir` empty folders, to the Drive trash, where
+  they are recoverable for 30 days. Neither deletes for good; `rm` never
+  touches a folder, and `rmdir` refuses one that holds anything. Both ask
+  first, or need `--force`.
 - `cp` and `mv` never replace a file without `--force`. A replaced file keeps
   its Drive revisions (`cp`) or goes to the trash (`mv`).
 - Downloads are written owner-only and checked against Drive's md5.

@@ -320,6 +320,13 @@ fn cp_trees_both_ways_skip_what_matches() {
     std::fs::write(back.join("a.json"), b"mine").unwrap();
     let err = e.fails(2, &["cp", &at("copy"), s(&back)]);
     assert_eq!(err["reason"], "existing_differs");
+    let remedy = err["remedy"].as_str().unwrap();
+    assert!(
+        remedy.contains("--force")
+            && remedy.contains("overwritten")
+            && !remedy.contains("revision"),
+        "a download's remedy is about the local files: {remedy}"
+    );
     assert_eq!(std::fs::read(back.join("a.json")).unwrap(), b"mine");
     let forced = e.ok(&["cp", "--force", &at("copy"), s(&back)]);
     assert_eq!(forced["replaced"], 1);
@@ -458,7 +465,7 @@ fn md5sum_lists_files_below_or_one_file() {
 }
 
 #[test]
-fn duplicates_lists_every_shared_name_and_ls_names_the_command() {
+fn shared_names_are_listed_with_their_ids_and_refused_in_a_path() {
     let e = Env::signed_in();
     let f = e.fake();
     let one = f.add_file(ROOT_ID, "index.json", b"one");
@@ -472,10 +479,137 @@ fn duplicates_lists_every_shared_name_and_ls_names_the_command() {
     let mut ids = vec![one, two];
     ids.sort();
     assert_eq!(groups[0]["ids"], serde_json::json!(ids));
-    let err = e.fails(1, &["ls", &store()]);
-    assert_eq!(err["reason"], "duplicate_name");
-    assert!(
-        err["remedy"].as_str().unwrap().contains("gdrv duplicates"),
-        "{err}"
+
+    // A listing shows both, each with its id, as rclone lists them.
+    let listed = e.ok(&["ls", &store()]);
+    let rows: Vec<(&str, &str)> = listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| (i["path"].as_str().unwrap(), i["id"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            ("index.json", ids[0].as_str()),
+            ("index.json", ids[1].as_str())
+        ]
     );
+    assert_eq!(
+        paths(&e.ok(&["md5sum", &store()])),
+        vec!["index.json", "index.json"]
+    );
+
+    // A path cannot name one of them.
+    for args in [
+        &["cat", &at("index.json")][..],
+        &["ls", &at("index.json")],
+        &["md5sum", &at("index.json")],
+    ] {
+        let err = e.fails(1, args);
+        assert_eq!(err["reason"], "duplicate_name", "{args:?}");
+        let remedy = err["remedy"].as_str().unwrap();
+        assert!(remedy.contains("gdrv duplicates"), "{err}");
+        assert!(remedy.contains("by its own id"), "{err}");
+    }
+
+    // Other names in the folder are unaffected: a file, a folder, a document.
+    f.add_file(ROOT_ID, "other.txt", b"other");
+    let sub = f.add_folder(ROOT_ID, "sub");
+    f.add_file(&sub, "in.txt", b"in");
+    f.add_google_doc(ROOT_ID, "plan");
+    assert_eq!(e.run(&["cat", &at("other.txt")]).stdout, b"other");
+    assert_eq!(paths(&e.ok(&["ls", &at("sub")])), vec!["in.txt"]);
+    assert_eq!(e.ok(&["ls", &at("plan")])["items"][0]["type"], "document");
+
+    // Two folders of one name: both walked; each addressed by its id.
+    let d1 = f.add_folder(ROOT_ID, "dir");
+    let d2 = f.add_folder(ROOT_ID, "dir");
+    f.add_file(&d1, "a.txt", b"a");
+    f.add_file(&d2, "b.txt", b"b");
+    let deep = paths(&e.ok(&["ls", "-R", &store()]));
+    assert!(
+        deep.contains(&"dir/a.txt".to_string()) && deep.contains(&"dir/b.txt".to_string()),
+        "{deep:?}"
+    );
+    assert_eq!(e.fails(1, &["ls", &at("dir")])["reason"], "duplicate_name");
+    assert_eq!(
+        paths(&e.ok(&["ls", &format!("gdrive:{PROFILE}/{d2}")])),
+        vec!["b.txt"]
+    );
+}
+
+#[test]
+fn rmdir_trashes_only_empty_folders_after_checking_every_address() {
+    let e = Env::signed_in();
+    let f = e.fake();
+    let empty = f.add_folder(ROOT_ID, "empty");
+    let also = f.add_folder(ROOT_ID, "also-empty");
+    let full = f.add_folder(ROOT_ID, "full");
+    f.add_file(&full, "kept.txt", b"kept");
+    let only_docs = f.add_folder(ROOT_ID, "docs");
+    f.add_google_doc(&only_docs, "plan");
+    let left = f.add_folder(ROOT_ID, "left");
+    let old = f.add_file(&left, "old.txt", b"old");
+    f.trash(&old);
+    f.add_file(ROOT_ID, "plain.txt", b"p");
+    let theirs = f.add_folder(MY_DRIVE, "Theirs");
+    f.add_shortcut(ROOT_ID, "linked", &theirs);
+
+    // A full folder among the addresses stops the run before anything is trashed.
+    let err = e.fails(2, &["rmdir", "--force", &at("empty"), &at("full")]);
+    assert_eq!(err["reason"], "not_empty", "{err}");
+    assert!(!f.is_trashed(&empty) && !f.is_trashed(&full));
+    // A Google document counts as something held.
+    assert_eq!(
+        e.fails(2, &["rmdir", "--force", &at("docs")])["reason"],
+        "not_empty"
+    );
+    assert_eq!(
+        e.fails(2, &["rmdir", "--force", &at("plain.txt")])["code"],
+        "usage"
+    );
+    assert_eq!(
+        e.fails(4, &["rmdir", "--force", &at("nothing")])["code"],
+        "not_found"
+    );
+    assert_eq!(
+        e.fails(2, &["rmdir", "--force", &at("linked")])["reason"],
+        "shortcut"
+    );
+    assert!(!f.is_trashed(&theirs));
+    f.clear_requests();
+    assert_eq!(
+        e.fails(6, &["rmdir", &at("empty")])["code"],
+        "confirmation_required"
+    );
+    assert!(f.requests().is_empty(), "exit 6 sent nothing");
+
+    let gone = e.ok(&[
+        "rmdir",
+        "--force",
+        &at("empty"),
+        &at("also-empty"),
+        &at("left"),
+    ]);
+    assert_eq!(gone["schema"], "drive-rmdir/v1");
+    assert_eq!(gone["trashed"], 3);
+    assert!(f.is_trashed(&empty) && f.is_trashed(&also) && f.is_trashed(&left));
+    assert!(!f.is_trashed(&full));
+
+    // Under root: the scratch folder `folder create` makes is trashed from My Drive.
+    let made = e.ok(&["folder", "create", "Scratch", "--profile", PROFILE]);
+    let scratch = made["spec"]
+        .as_str()
+        .unwrap()
+        .rsplit('/')
+        .next()
+        .unwrap()
+        .to_string();
+    e.ok(&[
+        "rmdir",
+        "--force",
+        &format!("gdrive:{PROFILE}/root/Scratch"),
+    ]);
+    assert!(f.is_trashed(&scratch));
 }

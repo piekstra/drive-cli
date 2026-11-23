@@ -88,4 +88,4 @@ jobs:
           advanced-security: false
           annotations: true
           min-severity: high
-          version: 1.33.1
+          version: 1.33.0
