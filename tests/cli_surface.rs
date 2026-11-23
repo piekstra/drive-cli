@@ -161,6 +161,9 @@ fn an_argument_clap_refuses_is_exit_2() {
         &["ls", "--listing", "some", "gdrive:home/root"][..],
         &["rm"],
         &["cp", "only-one"],
+        &["cp", "--transfers", "0", "a", "gdrive:home/root/a"],
+        &["cp", "--transfers", "9", "a", "gdrive:home/root/a"],
+        &["cp", "--transfers", "many", "a", "gdrive:home/root/a"],
     ] {
         assert_eq!(e.run(args).status.code(), Some(2), "{args:?}");
     }

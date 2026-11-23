@@ -319,6 +319,15 @@ fn other_bytes(target: &str) -> CliError {
     .because(reason::EXISTING_DIFFERS)
 }
 
+/// `cp --transfers`, when given, lowers how many files a tree copy moves
+/// at once.
+fn with_transfers(d: Drive, transfers: Option<u8>) -> Drive {
+    match transfers {
+        Some(n) => d.transfers(usize::from(n)),
+        None => d,
+    }
+}
+
 pub fn cp(
     cli: &DriveCli,
     profile: Option<&str>,
@@ -331,14 +340,14 @@ pub fn cp(
         match (from, to) {
             (Location::Local { path, .. }, Location::Drive(a)) => {
                 check_profile(profile, &a)?;
-                let d = open(cli, &a.store, Listing::Whole)?;
+                let d = with_transfers(open(cli, &a.store, Listing::Whole)?, args.transfers);
                 let (target, done) = upload(&d, &path, &a, args.force)
                     .map_err(|e| explained(force_remedy(e, args.force, true), &args.destination))?;
                 ("upload", path.display().to_string(), target, done)
             }
             (Location::Drive(a), Location::Local { path, into }) => {
                 check_profile(profile, &a)?;
-                let d = open(cli, &a.store, Listing::Whole)?;
+                let d = with_transfers(open(cli, &a.store, Listing::Whole)?, args.transfers);
                 let (target, done) = download(&d, &a, &path, into, args.force)
                     .map_err(|e| explained(force_remedy(e, args.force, false), &args.source))?;
                 ("download", d.target(&a.rel), target, done)

@@ -128,6 +128,11 @@ beside a shortcut without notice. The read-only commands `ls`, `md5sum` and
   `/` in its name, could otherwise leave the local directory. So could two
   items that land on one local path (`A.txt` and `a.txt` on macOS). gdrv
   refuses them before anything is written (reason `unsafe_name`).
+- **Trees go several files at a time.** Uploads run 4 at a time and
+  downloads 8, after every missing folder is made once. `--transfers N`
+  (1 to 8) lowers that, and uploads never go past 4: Drive takes about three
+  writes a second per user. The first failure stops the copy, and what was
+  copied before it stays.
 - **Copies within Drive are not supported.** `mv` moves a file within one tree.
 
 ### Confirmation
