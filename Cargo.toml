@@ -5,7 +5,7 @@ edition = "2021"
 # pk-cli-drive needs 1.89 (`File::lock`).
 rust-version = "1.89"
 description = "gdrv: Google Drive from the command line for scripts and agents, through Drive's own API with the owner's OAuth client: ls, cat, cp with md5 checks, mv, rm and rmdir to the trash, mkdir, md5sum, duplicates. Unofficial; not affiliated with Google."
-license = "MIT OR Apache-2.0"
+license = "AGPL-3.0-only"
 repository = "https://github.com/piekstra/drive-cli"
 readme = "README.md"
 keywords = ["google-drive", "drive", "cli", "rclone"]

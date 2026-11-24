@@ -35,5 +35,4 @@ Describe what changed and how it was tested. A maintainer reviews every PR.
 
 ## License of contributions
 
-By contributing, you agree your work is dual-licensed under **MIT OR
-Apache-2.0**.
+By contributing, you agree your work is licensed under **AGPL-3.0-only**.
