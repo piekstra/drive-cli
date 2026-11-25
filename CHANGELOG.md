@@ -3,6 +3,12 @@
 All notable changes to gdrv. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+- `stat --help` no longer says that an item shared with the account often has
+  no parent: that has not been observed. `docs/drive.md` separates what Google
+  documents, what a real account answered, and what has not been observed.
+
 ## 0.2.0
 
 - `permissions list <address>` (`drive-permission-list/v1`): who may open an

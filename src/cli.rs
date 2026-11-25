@@ -59,9 +59,9 @@ pub enum Command {
     /// The address is a folder id, a path under one, or the id of any file
     /// or folder by itself (gdrive:<profile>/<id>). `parent` is the Drive id
     /// of the folder that holds the item, and is left out where Drive names
-    /// none this sign-in can see: My Drive itself, and often an item shared
-    /// with the account. Shortcuts are followed (the whole listing). Read
-    /// only.
+    /// none this sign-in can see, as for My Drive itself. An item shared with
+    /// the account may have none. Shortcuts are followed (the whole listing).
+    /// Read only.
     #[command(after_help = ADDRESS_HELP)]
     Stat(StatArgs),
 
