@@ -40,8 +40,7 @@ API.
 
 ## Sharing and parents
 
-What Drive documents, what gdrv does, and what has not been tried against a
-real account:
+What Drive documents and what gdrv does:
 
 - **Scopes.** Drive's discovery document lists `drive.file` among the scopes
   `permissions.list` and file metadata accept. It does not say which grants an
@@ -57,9 +56,21 @@ real account:
   comes from only in shared drives, so in My Drive the folder above's grants
   are compared: the same grant, at that role or higher, is inherited.
 
-How a real account answers `permissions.list` under `drive.file`, and whether
-`parents` is empty there, is as documented above and has not been checked
-against a live one.
+Observed on a real account with the `drive` scope (2026-11-25, synthetic items
+the account owns in My Drive):
+
+- A top-level folder's parent is My Drive's id. A folder's or file's parent
+  below it is the folder that holds it, in `stat` and in `ls`.
+- `permissions list` answers for a folder, a folder in it and a file there. An
+  unshared item lists its owner alone, shown as direct, and no link sharing.
+
+Not observed:
+
+- `drive.file`: which grants it lists, and whether `parent` is there, on an
+  item the app did not make.
+- An inherited grant to someone else.
+- An item another account owns and shared: its parent, and whether Drive lists
+  its grants.
 
 ## Coming from rclone
 
