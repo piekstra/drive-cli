@@ -122,8 +122,8 @@ same role or higher, reaches the item from it. When the folder above is out of
 this sign-in's sight, the source is `unknown`. `link_sharing` lists the grants
 of type `anyone` and `domain`, with whether each shows in search.
 
-Drive lists grants to an account that may change them. Another account gets
-exit 3, reason `permissions_hidden`. `can_share` says which one this is. Under
+Drive may refuse to list grants to an account that may not change them: exit 3,
+reason `permissions_hidden`. `can_share` says which one this is. Under
 the `drive.file` scope an item this Cloud project's clients did not make or
 open is exit 4, as it is for every command.
 
