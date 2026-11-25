@@ -51,8 +51,10 @@ cargo run -- ls --help
   keychain read or request.
 - **Every write reads back.** Report success only after Drive or the disk
   shows the result.
-- **One JSON document per run**, tagged `<name>/v1`. A schema change is a new
-  version, not an edit.
+- **One JSON document per run**, tagged `<name>/v1`. A change a reader would
+  break on is a new version. An added optional field keeps the tag, as
+  cli-common's DESIGN.md does for a list's `warnings`, and the CHANGELOG names
+  it.
 - **A Drive mechanism goes into `pk-cli-drive`**, through a cli-common PR and
   tag, not into this repo.
 - **Dogfood on a real account in a scratch folder gdrv makes**, and trash it

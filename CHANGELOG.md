@@ -14,7 +14,8 @@ All notable changes to gdrv. The format follows
 - `stat <address>` (`drive-item/v1`): one item's id, parent, size, modified
   time, md5, and whether this account owns it, has shared it and may share it.
   An address may name any file or folder by its id alone.
-- `ls` rows have `parent`, the id of the folder each item is in.
+- `ls` rows have `parent`, the id of the folder each item is in: an added
+  field of `drive-entry-list/v1`, always present.
 - `client import --from-profile <NAME>` copies another profile's OAuth client
   (from cli-common v0.37.6), so a second sign-in of a Cloud project needs no
   client JSON.

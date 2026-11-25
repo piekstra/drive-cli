@@ -53,7 +53,7 @@ in with `--client-stdin` to keep it off disk entirely.
 | `login --profile <NAME>` | Sign a profile in to one Google account. `--scope file` asks for `drive.file` instead of full Drive; `--account <EMAIL>` refuses a sign-in to any other account |
 | `status --profile <NAME>` | Whether the profile is signed in, and as whom. `--local` reads no keychain |
 | `logout --profile <NAME>` | Remove the profile's sign-in from this machine. `--revoke` also revokes the grant at Google, `--forget` removes the profile too |
-| `client import --profile <NAME>` | Store a client for a profile without signing in (`--file` or `--stdin`) |
+| `client import --profile <NAME>` | Store a client for a profile without signing in (`--file`, `--stdin`, or `--from-profile <NAME>` to copy another profile's) |
 | `profiles list`, `profiles remove <NAME>` | The profiles on this machine |
 | `about --profile <NAME>` | The account and its storage |
 | `folder create <NAME>`, `folder list` | Folders at the top of My Drive |
@@ -123,7 +123,8 @@ this sign-in's sight, the source is `unknown`. `link_sharing` lists the grants
 of type `anyone` and `domain`, with whether each shows in search.
 
 Drive may refuse to list grants to an account that may not change them: exit 3,
-reason `permissions_hidden`. `can_share` says which one this is. Under
+reason `permissions_hidden`. Signing in again does not change that: branch on
+`reason`, and ask the item's owner. `can_share` says which one this is. Under
 the `drive.file` scope an item this Cloud project's clients did not make or
 open is exit 4, as it is for every command.
 
@@ -166,7 +167,7 @@ already there.
 | 0 | Done |
 | 1 | Something else failed, such as an unsafe name or two items sharing a name |
 | 2 | Usage: a bad address, a refused overwrite, a write through a shortcut, a folder that is not empty, a profile not signed in |
-| 3 | Auth: the sign-in was refused or revoked, the keychain did not answer, or Drive will not list who may open an item (reason `permissions_hidden`) |
+| 3 | Auth: the sign-in was refused or revoked, the keychain did not answer, or Drive will not list who may open an item (reason `permissions_hidden`, where a new sign-in does not help) |
 | 4 | Not found |
 | 5 | Google's API failed, or a write did not read back |
 | 6 | Confirmation required (`rm` or `rmdir` without `--force`) |

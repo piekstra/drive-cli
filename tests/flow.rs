@@ -126,6 +126,8 @@ fn ls_one_level_recursive_one_file_and_listings() {
     assert_eq!(items[2]["type"], "document");
     assert!(items[2].get("md5").is_none());
     assert_eq!(items[3]["type"], "folder");
+    // The folder each item is in, for every row, a followed shortcut's too.
+    assert!(items.iter().all(|i| i["parent"] == ROOT_ID), "{one}");
 
     let bytes = e.ok(&["ls", "--listing", "bytes", &store()]);
     assert_eq!(paths(&bytes), vec!["a.txt", "sub"]);

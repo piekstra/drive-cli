@@ -45,8 +45,8 @@ pub enum Command {
     /// One level lists folders and files; -R lists every file below by its
     /// path, folders only in those paths, as `rclone lsjson -R --files-only`.
     /// Each item has its Drive id, which addresses a folder directly
-    /// (gdrive:<profile>/<id>), and each file its size, modified time and
-    /// md5. Items that share a name are each listed, though a path cannot
+    /// (gdrive:<profile>/<id>), the id of the folder it is in (`parent`), and
+    /// each file its size, modified time and md5. Items that share a name are each listed, though a path cannot
     /// name one of them. The default listing is `whole`: Google's own
     /// documents (Docs, Sheets) are listed with type `document` and no md5,
     /// and shortcuts are followed, as rclone lists.
