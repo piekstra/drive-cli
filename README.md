@@ -53,7 +53,7 @@ in with `--client-stdin` to keep it off disk entirely.
 | `login --profile <NAME>` | Sign a profile in to one Google account. `--scope file` asks for `drive.file` instead of full Drive; `--account <EMAIL>` refuses a sign-in to any other account |
 | `status --profile <NAME>` | Whether the profile is signed in, and as whom. `--local` reads no keychain |
 | `logout --profile <NAME>` | Remove the profile's sign-in from this machine. `--revoke` also revokes the grant at Google, `--forget` removes the profile too |
-| `client import --profile <NAME>` | Store a client for a profile without signing in (`--file` or `--stdin`) |
+| `client import --profile <NAME>` | Store a client for a profile without signing in (`--file`, `--stdin`, or `--from-profile <NAME>` to copy another profile's) |
 | `profiles list`, `profiles remove <NAME>` | The profiles on this machine |
 | `about --profile <NAME>` | The account and its storage |
 | `folder create <NAME>`, `folder list` | Folders at the top of My Drive |
@@ -86,7 +86,9 @@ must name the same profile, or the command is exit 2.
 
 | Command | What it does | Listing | Schema |
 |---|---|---|---|
-| `ls <address> [-R]` | One level: folders and files. `-R`: every file below, by path. Each item has its Drive id, and each file its size, modified time and md5. Items that share a name are each listed | `--listing`, default `whole` | `drive-entry-list/v1` |
+| `ls <address> [-R]` | One level: folders and files. `-R`: every file below, by path. Each item has its Drive id, the id of the folder it is in (`parent`), and each file its size, modified time and md5. Items that share a name are each listed | `--listing`, default `whole` | `drive-entry-list/v1` |
+| `stat <address>` | One item: its id, the id of the folder that holds it (`parent`), size, modified time, md5, and whether this account owns it, has shared it and may share it. A file or folder is also addressed by its id alone (`gdrive:<profile>/<id>`). Read only | `whole` | `drive-item/v1` |
+| `permissions list <address>` | Who may open an item: each grant's type, role, email or domain and source (`direct`, `inherited` from a folder above, or `unknown`), `link_sharing`, and `can_share`. Read only: nothing is shared or unshared | `whole` | `drive-permission-list/v1` |
 | `cat <address>` | One file's bytes on stdout. With `--json`, the content as UTF-8 text or base64 | `whole` | `drive-file/v1` |
 | `cp <source> <destination>` | A file or a tree, local to Drive or Drive to local | `whole` | `drive-copy/v1` |
 | `mv <source> <destination>` | Move or rename a file within one folder id's tree | `whole` | `drive-move/v1` |
@@ -110,6 +112,21 @@ happens to them.
 Every command that writes uses `whole`, so nothing is written onto, through or
 beside a shortcut without notice. The read-only commands `ls`, `md5sum` and
 `duplicates` take `--listing bytes` to see only files with bytes.
+
+### Who may open an item
+
+`permissions list` reads grants; it never changes one. Drive's own answer says
+where a grant comes from when it gives one. Otherwise the folder above's
+grants decide, one more request: a grant the folder above also holds, at the
+same role or higher, reaches the item from it. When the folder above is out of
+this sign-in's sight, the source is `unknown`. `link_sharing` lists the grants
+of type `anyone` and `domain`, with whether each shows in search.
+
+Drive may refuse to list grants to an account that may not change them: exit 3,
+reason `permissions_hidden`. Signing in again does not change that: branch on
+`reason`, and ask the item's owner. `can_share` says which one this is. Under
+the `drive.file` scope an item this Cloud project's clients did not make or
+open is exit 4, as it is for every command.
 
 ### Copying
 
@@ -150,7 +167,7 @@ already there.
 | 0 | Done |
 | 1 | Something else failed, such as an unsafe name or two items sharing a name |
 | 2 | Usage: a bad address, a refused overwrite, a write through a shortcut, a folder that is not empty, a profile not signed in |
-| 3 | Auth: the sign-in was refused or revoked, or the keychain did not answer |
+| 3 | Auth: the sign-in was refused or revoked, the keychain did not answer, or Drive will not list who may open an item (reason `permissions_hidden`, where a new sign-in does not help) |
 | 4 | Not found |
 | 5 | Google's API failed, or a write did not read back |
 | 6 | Confirmation required (`rm` or `rmdir` without `--force`) |
@@ -158,7 +175,8 @@ already there.
 With `--json`, an error is one document on stdout:
 `{"error": {"code", "message", "reason", "remedy"}}`. `reason` is set when a
 script can act on it: `existing_differs`, `occupied`, `google_document`,
-`shortcut`, `not_empty`, `unsafe_name`, `duplicate_name`.
+`shortcut`, `not_empty`, `unsafe_name`, `duplicate_name`,
+`permissions_hidden`.
 
 ## Other commands
 

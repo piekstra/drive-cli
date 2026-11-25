@@ -1,6 +1,6 @@
 [package]
 name = "drive-cli"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 # pk-cli-drive needs 1.89 (`File::lock`).
 rust-version = "1.89"
@@ -25,12 +25,12 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 serde_json = { version = "1", features = ["preserve_order"] }
-pk-cli-core = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.4" }
-pk-cli-auth = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.4" }
-pk-cli-config = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.4" }
-pk-cli-secrets = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.4" }
-pk-cli-selfupdate = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.4" }
-pk-cli-drive = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.4", features = ["google"] }
+pk-cli-core = { git = "https://github.com/piekstra/cli-common", tag = "v0.38.1" }
+pk-cli-auth = { git = "https://github.com/piekstra/cli-common", tag = "v0.38.1" }
+pk-cli-config = { git = "https://github.com/piekstra/cli-common", tag = "v0.38.1" }
+pk-cli-secrets = { git = "https://github.com/piekstra/cli-common", tag = "v0.38.1" }
+pk-cli-selfupdate = { git = "https://github.com/piekstra/cli-common", tag = "v0.38.1" }
+pk-cli-drive = { git = "https://github.com/piekstra/cli-common", tag = "v0.38.1", features = ["google"] }
 
 [target.'cfg(unix)'.dependencies]
 # SIGPIPE back to its default, so `gdrv ls … | head` ends quietly.
@@ -38,7 +38,7 @@ libc = "0.2"
 
 [dev-dependencies]
 # The fake Drive API server on 127.0.0.1 the black-box tests sign in to.
-pk-cli-drive = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.4", features = ["fake-google"] }
+pk-cli-drive = { git = "https://github.com/piekstra/cli-common", tag = "v0.38.1", features = ["fake-google"] }
 assert_cmd = "2"
 tempfile = "3"
 # Follows the fake's sign-in page to the loopback listener `gdrv login` waits on.

@@ -13,7 +13,7 @@ pub mod standard;
 use pk_cli_core::CliError;
 use pk_cli_drive::google::DriveCommand;
 
-use cli::{AuthCommand, Cli, Command};
+use cli::{AuthCommand, Cli, Command, PermissionsCommand};
 use context::drive_cli;
 
 /// Run one parsed command.
@@ -28,6 +28,10 @@ pub fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Auth(AuthCommand::Status(args)) => drive(&DriveCommand::Status(args.clone())),
         Command::Auth(AuthCommand::Logout(args)) => drive(&DriveCommand::Logout(args.clone())),
         Command::Ls(args) => files::ls(&drive_cli()?, profile, args, json),
+        Command::Stat(args) => files::stat(&drive_cli()?, profile, args, json),
+        Command::Permissions(PermissionsCommand::List(args)) => {
+            files::permissions_list(&drive_cli()?, profile, args, json)
+        }
         Command::Cat(args) => files::cat(&drive_cli()?, profile, args, json),
         Command::Cp(args) => files::cp(&drive_cli()?, profile, args, json),
         Command::Mv(args) => files::mv(&drive_cli()?, profile, args, json),

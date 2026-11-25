@@ -1,16 +1,23 @@
-//! The file commands: ls, cat, cp, mv, rm, mkdir, md5sum, duplicates.
+//! The file commands: ls, stat, cat, cp, mv, rm, mkdir, md5sum, duplicates,
+//! permissions.
 
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use pk_cli_core::{confirm, output, CliError};
-use pk_cli_drive::google::{md5_file, Drive, DriveCli, Existing, ItemKind, ListedItem, Listing};
+use pk_cli_drive::google::{
+    md5_file, Drive, DriveCli, Existing, ItemDetails, ItemKind, ListedItem, Listing, Permission,
+    Sharing,
+};
 use pk_cli_drive::{reason, RemoteRead, RemoteStore};
 use serde_json::{json, Map, Value};
 
 use crate::address::{join, split, DriveAddress, Location};
-use crate::cli::{CatArgs, CpArgs, HashArgs, LsArgs, MkdirArgs, MvArgs, RmArgs, RmdirArgs};
+use crate::cli::{
+    CatArgs, CpArgs, HashArgs, LsArgs, MkdirArgs, MvArgs, PermissionsListArgs, RmArgs, RmdirArgs,
+    StatArgs,
+};
 use crate::context::{open, BIN};
 
 /// What is at a path in a store.
@@ -143,6 +150,7 @@ fn item_row(path: &str, i: &ListedItem) -> Value {
     row.insert("path".into(), json!(path));
     row.insert("type".into(), json!(kind_name(i.kind)));
     row.insert("id".into(), json!(i.id));
+    row.insert("parent".into(), json!(i.parent));
     if let Some(size) = i.size {
         row.insert("size".into(), json!(size));
     }
@@ -223,6 +231,187 @@ fn list(d: &Drive, a: &DriveAddress, recursive: bool) -> Result<Vec<Value>, CliE
             }])
         }
     }
+}
+
+// ── stat and permissions ────────────────────────────────────────────────
+
+/// An item's own fields, in an order a reader can scan; absent ones are left
+/// out.
+fn item_fields(d: &Drive, rel: &str, i: &ItemDetails) -> Map<String, Value> {
+    let mut v = Map::new();
+    v.insert("location".into(), json!(d.target(rel)));
+    v.insert("id".into(), json!(i.id));
+    v.insert("name".into(), json!(i.name));
+    v.insert("type".into(), json!(kind_name(i.kind)));
+    if let Some(parent) = &i.parent {
+        v.insert("parent".into(), json!(parent));
+    }
+    if let Some(size) = i.size {
+        v.insert("size".into(), json!(size));
+    }
+    if let Some(at) = rfc3339(i.modified) {
+        v.insert("modified".into(), json!(at));
+    }
+    if let Some(md5) = &i.md5 {
+        v.insert("md5".into(), json!(md5));
+    }
+    if i.trashed {
+        v.insert("trashed".into(), json!(true));
+    }
+    if let Some(mine) = i.owned_by_me {
+        v.insert("owned_by_me".into(), json!(mine));
+    }
+    if let Some(shared) = i.shared {
+        v.insert("shared".into(), json!(shared));
+    }
+    v.insert("can_share".into(), json!(i.can_share));
+    if i.limited_access {
+        v.insert("limited_access".into(), json!(true));
+    }
+    if i.via_shortcut {
+        v.insert("via_shortcut".into(), json!(true));
+    }
+    v
+}
+
+pub fn stat(
+    cli: &DriveCli,
+    profile: Option<&str>,
+    args: &StatArgs,
+    json: bool,
+) -> Result<(), CliError> {
+    let a = drive_address(&args.address, "stat")?;
+    check_profile(profile, &a)?;
+    let d = open(cli, &a.store, Listing::Whole)?;
+    let item = d
+        .details(&a.rel)
+        .map_err(|e| explained(e, &args.address))?
+        .ok_or_else(|| not_found(&d, &a.rel))?;
+    let payload = Value::Object(item_fields(&d, &a.rel, &item));
+    output::emit(json, "drive-item", payload, |v| output::kv(v, 0));
+    Ok(())
+}
+
+/// `direct`, `inherited` or `unknown`: where a grant comes from.
+fn source(p: &Permission) -> &'static str {
+    match p.inherited {
+        Some(true) => "inherited",
+        Some(false) => "direct",
+        None => "unknown",
+    }
+}
+
+/// One grant, as `permissions list` shows it; absent fields are left out.
+fn grant_row(p: &Permission) -> Value {
+    let mut row = Map::new();
+    row.insert("id".into(), json!(p.id));
+    row.insert("type".into(), json!(p.kind));
+    row.insert("role".into(), json!(p.role));
+    if let Some(email) = &p.email {
+        row.insert("email".into(), json!(email));
+    }
+    if let Some(domain) = &p.domain {
+        row.insert("domain".into(), json!(domain));
+    }
+    row.insert("source".into(), json!(source(p)));
+    if let Some(from) = &p.inherited_from {
+        row.insert("inherited_from".into(), json!(from));
+    }
+    if let Some(d) = p.discoverable {
+        row.insert("discoverable".into(), json!(d));
+    }
+    if let Some(at) = &p.expires {
+        row.insert("expires".into(), json!(at));
+    }
+    if p.deleted {
+        row.insert("deleted".into(), json!(true));
+    }
+    if p.pending_owner {
+        row.insert("pending_owner".into(), json!(true));
+    }
+    if let Some(view) = &p.view {
+        row.insert("view".into(), json!(view));
+    }
+    Value::Object(row)
+}
+
+/// Who a grant is for, in a few words.
+fn who(p: &Permission) -> String {
+    match p.kind.as_str() {
+        "anyone" => "anyone with the link".into(),
+        "domain" => format!(
+            "anyone at {} with the link",
+            p.domain.as_deref().unwrap_or("the domain")
+        ),
+        _ => p.email.clone().unwrap_or_else(|| "(no address)".into()),
+    }
+}
+
+fn sharing_payload(d: &Drive, rel: &str, s: &Sharing) -> Value {
+    let mut v = item_fields(d, rel, &s.item);
+    let links: Vec<Value> = s
+        .permissions
+        .iter()
+        .filter(|p| p.by_link())
+        .map(grant_row)
+        .collect();
+    v.insert("link_sharing".into(), json!(links));
+    v.insert(
+        "permissions".into(),
+        Value::Array(s.permissions.iter().map(grant_row).collect()),
+    );
+    Value::Object(v)
+}
+
+pub fn permissions_list(
+    cli: &DriveCli,
+    profile: Option<&str>,
+    args: &PermissionsListArgs,
+    json: bool,
+) -> Result<(), CliError> {
+    let a = drive_address(&args.address, "permissions list")?;
+    check_profile(profile, &a)?;
+    let d = open(cli, &a.store, Listing::Whole)?;
+    let sharing = d
+        .permissions(&a.rel)
+        .map_err(|e| explained(e, &args.address))?
+        .ok_or_else(|| not_found(&d, &a.rel))?;
+    output::emit(
+        json,
+        "drive-permission-list",
+        sharing_payload(&d, &a.rel, &sharing),
+        |v| {
+            let mut head = v.clone();
+            if let Some(o) = head.as_object_mut() {
+                o.remove("permissions");
+                o.remove("link_sharing");
+            }
+            output::kv(&head, 0);
+            let rows: Vec<Value> = sharing
+                .permissions
+                .iter()
+                .map(|p| {
+                    let mut row = Map::new();
+                    row.insert("who".into(), json!(who(p)));
+                    row.insert("role".into(), json!(p.role));
+                    row.insert("source".into(), json!(source(p)));
+                    if let Some(from) = &p.inherited_from {
+                        row.insert("from".into(), json!(from));
+                    }
+                    if let Some(view) = &p.view {
+                        row.insert("view".into(), json!(view));
+                    }
+                    Value::Object(row)
+                })
+                .collect();
+            println!();
+            output::table(&output::table_view(
+                &rows,
+                &["who", "role", "source", "from", "view"],
+            ));
+        },
+    );
+    Ok(())
 }
 
 // ── cat ─────────────────────────────────────────────────────────────────

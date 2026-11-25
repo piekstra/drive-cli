@@ -22,6 +22,8 @@ pub const CAPABILITIES: &[&str] = &[
     "folder",
     "profiles",
     "ls",
+    "stat",
+    "permissions",
     "cat",
     "cp",
     "mv",

@@ -27,6 +27,9 @@ const COMMANDS: &[&[&str]] = &[
     &["auth", "status"],
     &["auth", "logout"],
     &["ls"],
+    &["stat"],
+    &["permissions"],
+    &["permissions", "list"],
     &["cat"],
     &["cp"],
     &["mv"],
@@ -102,6 +105,8 @@ fn version_info_and_completions() {
         .collect();
     for c in [
         "ls",
+        "stat",
+        "permissions",
         "cat",
         "cp",
         "mv",
@@ -250,5 +255,36 @@ fn a_keychain_wait_that_is_not_seconds_is_exit_2_before_any_read() {
             .unwrap()
             .contains("GDRV_KEYCHAIN_WAIT"),
         "{err}"
+    );
+}
+
+#[test]
+fn stat_and_permissions_take_one_drive_address_and_stay_read_only() {
+    let e = Env::offline();
+    // Local paths, missing addresses and unknown subcommands are exit 2,
+    // before any keychain read or request.
+    for args in [
+        &["stat"][..],
+        &["stat", "./local"],
+        &["permissions"],
+        &["permissions", "list"],
+        &["permissions", "list", "./local"],
+        &["permissions", "add", "gdrive:home/1Synthetic"],
+    ] {
+        let mut a = vec!["--json"];
+        a.extend_from_slice(args);
+        let out = e.run(&a);
+        assert_eq!(out.status.code(), Some(2), "gdrv {args:?}");
+    }
+    // `permissions` only lists.
+    let help = String::from_utf8(e.run(&["permissions", "--help"]).stdout).unwrap();
+    assert!(help.contains("list"), "{help}");
+    for word in ["add", "remove", "share", "unshare"] {
+        assert!(!help.contains(&format!("  {word}")), "{word}: {help}");
+    }
+    let list = String::from_utf8(e.run(&["permissions", "list", "--help"]).stdout).unwrap();
+    assert!(
+        list.contains("Nothing is shared or unshared here"),
+        "{list}"
     );
 }

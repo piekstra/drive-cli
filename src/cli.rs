@@ -45,13 +45,29 @@ pub enum Command {
     /// One level lists folders and files; -R lists every file below by its
     /// path, folders only in those paths, as `rclone lsjson -R --files-only`.
     /// Each item has its Drive id, which addresses a folder directly
-    /// (gdrive:<profile>/<id>), and each file its size, modified time and
-    /// md5. Items that share a name are each listed, though a path cannot
+    /// (gdrive:<profile>/<id>), the id of the folder it is in (`parent`), and
+    /// each file its size, modified time and md5. Items that share a name are each listed, though a path cannot
     /// name one of them. The default listing is `whole`: Google's own
     /// documents (Docs, Sheets) are listed with type `document` and no md5,
     /// and shortcuts are followed, as rclone lists.
     #[command(visible_alias = "list", after_help = ADDRESS_HELP)]
     Ls(LsArgs),
+
+    /// One item: its id, its parent folder, its size and md5, and whether
+    /// this account may share it (drive-item/v1).
+    ///
+    /// The address is a folder id, a path under one, or the id of any file
+    /// or folder by itself (gdrive:<profile>/<id>). `parent` is the Drive id
+    /// of the folder that holds the item, and is left out where Drive names
+    /// none this sign-in can see: My Drive itself, and often an item shared
+    /// with the account. Shortcuts are followed (the whole listing). Read
+    /// only.
+    #[command(after_help = ADDRESS_HELP)]
+    Stat(StatArgs),
+
+    /// Who may open an item in Drive. Read only.
+    #[command(subcommand)]
+    Permissions(PermissionsCommand),
 
     /// Print one file's bytes on stdout (--json: drive-file/v1).
     ///
@@ -164,6 +180,25 @@ pub enum AuthCommand {
     Logout(LogoutArgs),
 }
 
+#[derive(Subcommand, Debug)]
+pub enum PermissionsCommand {
+    /// Everyone who may open an item, and where each grant comes from
+    /// (drive-permission-list/v1).
+    ///
+    /// The address is a folder id, a path under one, or the id of any file
+    /// or folder by itself (gdrive:<profile>/<id>). Each grant has its type
+    /// (user, group, domain or anyone), its role, the email or domain, and
+    /// its source: `direct` (given on the item), `inherited` (it reaches the
+    /// item from a folder above, named by `inherited_from`), or `unknown`
+    /// when the folder above is out of this sign-in's sight. `link_sharing`
+    /// lists the grants of type `anyone` and `domain`. `can_share` says
+    /// whether this account may change them; Drive may not list grants to
+    /// an account that may not (exit 3, reason `permissions_hidden`).
+    /// Nothing is shared or unshared here.
+    #[command(after_help = ADDRESS_HELP)]
+    List(PermissionsListArgs),
+}
+
 /// What a listing shows and whether paths follow shortcuts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ListingArg {
@@ -203,6 +238,20 @@ pub struct LsArgs {
     /// What the listing shows.
     #[arg(long, value_enum, value_name = "LISTING", default_value_t = ListingArg::Whole)]
     pub listing: ListingArg,
+}
+
+#[derive(Args, Debug)]
+pub struct StatArgs {
+    /// gdrive:<profile>/<id>[/<path>]
+    #[arg(value_name = "ADDRESS")]
+    pub address: String,
+}
+
+#[derive(Args, Debug)]
+pub struct PermissionsListArgs {
+    /// gdrive:<profile>/<id>[/<path>]
+    #[arg(value_name = "ADDRESS")]
+    pub address: String,
 }
 
 #[derive(Args, Debug)]

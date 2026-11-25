@@ -32,9 +32,34 @@ API.
 | **A name can hold `/` or be `..`.** Drive allows both, and joined onto a local path they leave the destination | A download refuses such names before writing anything (exit 1, reason `unsafe_name`) |
 | **Drive is case-sensitive; macOS is not.** `A.txt` and `a.txt` can sit side by side in Drive, but on a Mac they land on one file | Refused the same way, as is a file named like a folder another file lands in |
 | **Replacing a file can lose its history.** Deleting and re-uploading gives a new id and drops the revisions | `cp --force` updates the file in place: same id, a new revision |
+| **An item's folder is not its path.** A path can be under a shared folder, or hold two items of one name, and a shared-with-me item has no visible folder | `stat` and `ls` print the Drive id of the folder that holds each item (`parent`), so "is this folder inside that one" compares ids. An `ls` row always has it, because the folder was listed to find the item. `stat` leaves it out where Drive names no parent this sign-in can see, and never guesses |
+| **A grant can come from a folder above.** Drive does not say where a My Drive grant comes from | `permissions list` says `direct`, `inherited` (with the folder) or `unknown`. Drive's own details settle it where it gives them, and otherwise the folder above's grants; `unknown` means that folder is out of sight |
 | **A 200 is not proof.** | Every write is read back: the md5 after an upload or a download, the new path and the empty old one after a move, the path gone after `rm` |
 | **Drive takes about three writes a second per user.** More at once only draws 429s | A tree copy uploads 4 files at a time and downloads 8, after making each missing folder once. The retries absorb a 429. `cp --transfers N` lowers both, `1` being one at a time. The first failure stops the copy, and what was already copied stays |
 | **The trash is not deletion.** | `rm` trashes files and `rmdir` empty folders; nothing is deleted for good. A trashed item is gone from every listing, and an item in the trash does not count against `rmdir`'s emptiness |
+
+## Sharing and parents
+
+What Drive documents, what gdrv does, and what has not been tried against a
+real account:
+
+- **Scopes.** Drive's discovery document lists `drive.file` among the scopes
+  `permissions.list` and file metadata accept. It does not say which grants an
+  app sees on a file it did not make. An item it may not see is exit 4.
+- **Parents.** Drive documents one parent per file. It does not say when a
+  `drive.file` sign-in, or an item shared with the account, gets none. gdrv
+  prints the one Drive names and leaves the field out otherwise.
+- **Grants.** A caller Drive will not list grants for gets exit 3, reason
+  `permissions_hidden`. `permissions list` never turns a refusal into an empty
+  list.
+- **Inherited or direct.** A folder's grants reach everything in it, and
+  nothing below can lower them. `permissionDetails` names the folder a grant
+  comes from only in shared drives, so in My Drive the folder above's grants
+  are compared: the same grant, at that role or higher, is inherited.
+
+How a real account answers `permissions.list` under `drive.file`, and whether
+`parents` is empty there, is as documented above and has not been checked
+against a live one.
 
 ## Coming from rclone
 
