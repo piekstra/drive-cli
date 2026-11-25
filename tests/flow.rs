@@ -674,3 +674,166 @@ fn a_trash_that_fails_partway_names_what_is_already_in_the_trash() {
         "{err}"
     );
 }
+
+// ── stat and permissions ────────────────────────────────────────────────
+
+fn grant<'a>(v: &'a Value, email: &str) -> &'a Value {
+    v["permissions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["email"] == email)
+        .unwrap_or_else(|| panic!("no grant for {email}: {v}"))
+}
+
+#[test]
+fn stat_names_one_items_parent_and_what_is_known_of_it() {
+    let e = Env::signed_in();
+    let f = e.fake();
+    let a = f.add_folder(ROOT_ID, "a");
+    let b = f.add_folder(&a, "b");
+    let file = f.add_file(&b, "f.txt", b"hello");
+
+    let v = e.ok(&["stat", &at("a/b")]);
+    assert_eq!(v["schema"], "drive-item/v1");
+    assert_eq!(
+        (&v["id"], &v["parent"], &v["type"]),
+        (
+            &Value::from(b.as_str()),
+            &Value::from(a.as_str()),
+            &Value::from("folder")
+        )
+    );
+    assert_eq!(v["can_share"], true);
+    assert_eq!(v["owned_by_me"], true);
+    assert!(v.get("md5").is_none() && v.get("trashed").is_none(), "{v}");
+    let v = e.ok(&["stat", &at("a/b/f.txt")]);
+    assert_eq!(v["parent"], b.as_str());
+    assert_eq!(
+        (&v["size"], &v["md5"]),
+        (&Value::from(5), &Value::from(md5_hex(b"hello")))
+    );
+    // By its own id, with no folder named.
+    let by_id = e.ok(&["stat", &format!("gdrive:{PROFILE}/{file}")]);
+    assert_eq!(
+        (&by_id["id"], &by_id["parent"]),
+        (&Value::from(file.as_str()), &Value::from(b.as_str()))
+    );
+    // `ls` names it too.
+    let listed = e.ok(&["ls", &at("a/b")]);
+    assert_eq!(listed["items"][0]["parent"], b.as_str());
+    // My Drive has no parent, and a hidden one is left out, not guessed.
+    let root = e.ok(&["stat", &format!("gdrive:{PROFILE}/root")]);
+    assert!(root.get("parent").is_none(), "{root}");
+    f.hide_parent(&file);
+    assert!(e.ok(&["stat", &at("a/b/f.txt")]).get("parent").is_none());
+
+    assert_eq!(e.fails(4, &["stat", &at("nothing")])["code"], "not_found");
+    let err = e.fails(4, &["stat", "gdrive:home/1NoSuchItem"]);
+    assert!(
+        err["remedy"].as_str().unwrap().contains("check the id"),
+        "{err}"
+    );
+    // Human output is key: value lines.
+    let out = e.run(&["stat", &at("a/b")]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("parent: "), "{text}");
+}
+
+#[test]
+fn permissions_list_shows_who_may_open_an_item_and_where_each_grant_comes_from() {
+    let e = Env::signed_in();
+    let f = e.fake();
+    let a = f.add_folder(ROOT_ID, "a");
+    let file = f.add_file(&a, "f.txt", b"x");
+    f.share(&a, "user", "reader", "above@example.test");
+    f.share(&file, "user", "writer", "direct@example.test");
+    f.share(&file, "domain", "reader", "example.test");
+    f.share(&file, "anyone", "reader", "");
+    f.clear_requests();
+    let v = e.ok(&["permissions", "list", &at("a/f.txt")]);
+    assert_eq!(v["schema"], "drive-permission-list/v1");
+    assert_eq!(
+        (&v["id"], &v["parent"]),
+        (&Value::from(file.as_str()), &Value::from(a.as_str()))
+    );
+    assert_eq!(v["can_share"], true);
+    assert_eq!(grant(&v, ACCOUNT)["source"], "direct");
+    let above = grant(&v, "above@example.test");
+    assert_eq!(
+        (&above["source"], &above["role"], &above["inherited_from"]),
+        (
+            &Value::from("inherited"),
+            &Value::from("reader"),
+            &Value::from(a.as_str())
+        )
+    );
+    assert_eq!(grant(&v, "direct@example.test")["source"], "direct");
+    let links = v["link_sharing"].as_array().unwrap();
+    assert_eq!(links.len(), 2, "{v}");
+    assert!(
+        links
+            .iter()
+            .any(|l| l["type"] == "domain" && l["domain"] == "example.test"),
+        "{v}"
+    );
+    assert!(
+        links
+            .iter()
+            .any(|l| l["type"] == "anyone" && l["discoverable"] == false),
+        "{v}"
+    );
+    // Nothing but reads were sent.
+    assert!(
+        f.requests().iter().all(|r| r.starts_with("GET ")),
+        "{:?}",
+        f.requests()
+    );
+
+    let out = e.run(&["permissions", "list", &at("a/f.txt")]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.contains("anyone with the link") && text.contains("above@example.test"),
+        "{text}"
+    );
+    assert!(!text.contains("null"), "{text}");
+
+    // A folder by its id, and one whose parent this sign-in cannot read.
+    let v = e.ok(&["permissions", "list", &format!("gdrive:{PROFILE}/{a}")]);
+    assert_eq!(grant(&v, "above@example.test")["source"], "direct");
+    f.unlistable(&a);
+    let v = e.ok(&["permissions", "list", &at("a/f.txt")]);
+    assert_eq!(grant(&v, "above@example.test")["source"], "unknown");
+
+    // An item whose grants Drive will not list says so, with a remedy.
+    let theirs = f.add_file(ROOT_ID, "theirs.txt", b"t");
+    f.owned_by_another(&theirs);
+    f.unlistable(&theirs);
+    let err = e.fails(3, &["permissions", "list", &at("theirs.txt")]);
+    assert_eq!(err["reason"], "permissions_hidden");
+    assert!(err["remedy"].as_str().unwrap().contains("owner"), "{err}");
+    assert_eq!(
+        e.fails(4, &["permissions", "list", &at("none")])["code"],
+        "not_found"
+    );
+}
+
+#[test]
+fn a_limited_folder_says_so_and_grants_on_it_are_direct() {
+    let e = Env::signed_in();
+    let f = e.fake();
+    let a = f.add_folder(ROOT_ID, "a");
+    f.share(&a, "user", "reader", "above@example.test");
+    let locked = f.add_folder(&a, "locked");
+    f.limit_access(&locked);
+    f.share(&locked, "user", "writer", "inside@example.test");
+    f.view_only(&locked, "above@example.test");
+    let v = e.ok(&["permissions", "list", &at("a/locked")]);
+    assert_eq!(v["limited_access"], true);
+    assert_eq!(grant(&v, "inside@example.test")["source"], "direct");
+    let view = grant(&v, "above@example.test");
+    assert_eq!(
+        (&view["view"], &view["source"]),
+        (&Value::from("metadata"), &Value::from("inherited"))
+    );
+}

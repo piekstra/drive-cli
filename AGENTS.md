@@ -27,7 +27,7 @@ cargo run -- ls --help
 | `src/cli.rs` | The clap tree, and the help that names each command's listing |
 | `src/address.rs` | `gdrive:<profile>/<folder id>[/<path>]` and local paths |
 | `src/context.rs` | The `DriveCli` (vault, bounded keychain wait), opening a store, and the debug-only test key file |
-| `src/files.rs` | ls, cat, cp, mv, rm, rmdir, mkdir, md5sum, duplicates |
+| `src/files.rs` | ls, stat, permissions, cat, cp, mv, rm, rmdir, mkdir, md5sum, duplicates |
 | `src/standard.rs` | config, self-update, completions, info |
 | `tests/cli_surface.rs` | Offline: every help, usage errors, exit codes, the JSON error document |
 | `tests/flow.rs` | Every command through the binary against the fake Drive server |
